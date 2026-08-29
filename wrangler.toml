@@ -1,0 +1,11 @@
+name = "carovana"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+[[durable_objects.bindings]]
+name = "PARTITA"
+class_name = "Partita"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Partita"]
