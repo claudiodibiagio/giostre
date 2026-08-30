@@ -544,13 +544,10 @@ export class Partita {
           this.dopoMossa();
           break;
         case 'avanti':
-          if(!finePartita(g.fase)) return;
-          this.pronti[p]=true;
-          if(this.pronti[0]&&this.pronti[1]&&g.giostra<3){
-            this.pronti=[false,false];
-            chiudiGiostra(g);
-            this.apriGiostra();
-          }
+          // decide solo chi ha creato la stanza: più semplice e non si incastra
+          if(p!==0||g.fase!=='intergiostra'||g.giostra>=3) return;
+          chiudiGiostra(g);
+          this.apriGiostra();
           break;
       }
     }catch(e){
