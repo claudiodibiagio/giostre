@@ -28,7 +28,7 @@ function nuovaPartita({seed=Date.now()&0xffff,primo=0,nomi=['Tu','Bot']}={}){
 }
 function creaDraft(g){
   const m=mischia(mazzoCompleto(),g.rnd);
-  // 1. l'approdo: sei carte a testa, quattro scoperte e due coperte
+  // 1. il mucchio: sei carte a testa, quattro scoperte e due coperte
   g.iniziali=[[],[]];
   for(const p of [0,1]){
     const sei=m.splice(0,6);
@@ -204,27 +204,33 @@ const BOT=1, ME=0;
 const BASSE_NECESSARIE = 9;
 
 function valoreDraft(c,carovana,livello){
-  const W=PROFILI[livello]||PROFILI.normale;
-  if(!c) return 3.6;                       // coperta: conviene prenderne circa metà
+  const W=PROFILI[livello]||PROFILI.cavaliere;
+  if(!c) return 3.6;                              // coperta: se ne prende circa metà
   const basse=carovana.filter(x=>!isGiullare(x)).length;
   const giu=carovana.filter(isGiullare).length;
-  const nove=carovana.filter(x=>x.v===9).length;
-  // il principiante vede le figure come carte mediocri e insegue i numeri alti
-  const fig=base=>base*W.draft + 3.4*(1-W.draft);
 
-  if(c.v===10) return fig(10.5+Math.min(giu,5)*1.9);
-  if(c.v===8)  return fig(8.0);
-  if(c.v===9)  return fig(6.6-nove*1.6);
+  if(isGiullare(c)){
+    let s;
+    if(W.obiettivo){                              // il Cavaliere si ferma alla sua quota
+      const ho=carovana.filter(x=>x.v===c.v).length, voglio=W.obiettivo[c.v];
+      s = ho<voglio ? 9.5+(voglio-ho)*1.2 : 3.0;
+      if(giu>=6) s*=0.45;                         // sei figure gli bastano
+    } else {                                      // il Buffone ne vuole quante può
+      s = (W.pref[c.v]||1)*(7.5+Math.min(giu,6)*0.7);
+    }
+    return s*W.giu;
+  }
 
-  let v = 2.4 + (c.v===7?0.6:0) + c.v*0.22*(1-W.draft);
+  let v = 2.4 + (c.v===7?0.6:0);
   v += Math.min(carovana.filter(x=>x.s===c.s&&!isGiullare(x)).length,3)*0.5;   // blocchi di seme
   v += Math.min(carovana.filter(x=>!isGiullare(x)&&x.v+c.v===8).length,2)*0.7; // coppie che fanno 8
-  if(basse>=BASSE_NECESSARIE) v *= 1-0.55*W.draft;   // oltre le nove necessarie rendono poco
-  return v;
+  if(basse>=(W.obiettivo?12:9)) v*=0.45;          // oltre il necessario rendono poco
+  return v*W.duello;
 }
+
 function botDraft(g,livello){
   const gr=g.gruppi[g.gruppoIdx], car=g.v[BOT].carovana;
-  const rum=(PROFILI[livello]||PROFILI.normale).rumore*0.4;
+  const rum=(PROFILI[livello]||PROFILI.cavaliere).rumore*0.4;
   let best=-1,bs=-Infinity;
   gr.forEach((sl,i)=>{
     if(sl.presa!==null)return;
@@ -242,9 +248,10 @@ function botDraft(g,livello){
    mira   : quanto ottimizza il Cavaliere verso l'8
 ------------------------------------------------------------------------- */
 const PROFILI={
-  facile:   {attesa:0,   combo:0,   tempi:0,   mira:0.45, draft:0.28, rumore:2.6},
-  normale:  {attesa:0.45,combo:0.45,tempi:0.45,mira:0.75, draft:0.42, rumore:1.4},
-  difficile:{attesa:1,   combo:1,   tempi:1,   mira:1,    draft:1,    rumore:0}
+  // Un solo avversario: equilibrato. Punta a sei figure, due per tipo,
+  // e cerca di fare il meglio su tutti e tre i fronti.
+  cavaliere:{attesa:1,combo:1,tempi:1,mira:1, draft:1, rumore:0.9,
+             obiettivo:{8:2,9:2,10:2}, duello:1.05, giu:1.05}
 };
 function potenzialeGiullari(v){
   return v.campo.giullari.length + v.mano.filter(isGiullare).length;
@@ -267,7 +274,7 @@ function miglioreCavaliere(mano,ac){
 }
 
 function botMossa(g,livello){
-  const W=PROFILI[livello]||PROFILI.normale;
+  const W=PROFILI[livello]||PROFILI.cavaliere;
   const v=g.v[BOT],av=g.v[ME],ac=g.assoCorrente,an=g.assoNemico;
   const legali=mosseLegali(g,BOT);
   if(legali.length<=1)return{tipo:'passa'};
@@ -288,7 +295,7 @@ function botMossa(g,livello){
     }
     const c=mano.find(x=>x.id===m.id);
 
-    if(m.ruolo==='giullare'){
+    if(m.ruolo==='giullare'){ const _g=W.giu;
       if(c.v===10){
         const altri=potenzialeGiullari(v)-1;
         // senza "combo" il bot crede che un 10 valga sempre: lo cala e basta
@@ -309,7 +316,7 @@ function botMossa(g,livello){
         const morte=mano.filter(x=>!isGiullare(x)&&!ruoliPossibili(v.campo,x).length).length;
         if(morte)s+=3.2*W.combo;
         else if(!ultimo)s-=2.0*W.combo;
-        return s;
+        return s*_g;
       }
       // il 9
       let s;
@@ -322,10 +329,10 @@ function botMossa(g,livello){
         if(ultimo)s+=2.2;
       }
       if(v.campo.giullari.some(x=>x.v===10)||mano.some(x=>x.v===10))s+=1.2*W.combo;
-      return s;
+      return s*_g;
     }
 
-    if(m.ruolo==='cavaliere'){
+    if(m.ruolo==='cavaliere'){ const _d=W.duello;
       if(!piano)return 0;
       const b=c.s===ac.s?1:0, d=Math.abs(BERSAGLIO-(c.v+b));
       // senza "mira" il bot guarda il valore nudo invece della distanza dall'8
@@ -333,10 +340,10 @@ function botMossa(g,livello){
       if(piano.cav.id===c.id) s+=2.2*W.mira;
       if(piano.equ&&piano.cav.id===c.id) s+=1.1*W.mira;
       if(b) s+=1.3;
-      return s;
+      return s*_d;
     }
 
-    if(m.ruolo==='scudiero'){
+    if(m.ruolo==='scudiero'){ const _d=W.duello;
       // il cuore del gioco: aspettare che l'avversario non possa più giocare il 9
       const rischio = avvFinito ? 0 : (1+av.mano.length*0.85)*W.attesa;
       const val = c.v + (v.campo.cav&&v.campo.cav.s===c.s?2:0);
@@ -345,16 +352,16 @@ function botMossa(g,livello){
       if(!v.campo.cav&&piano&&piano.cav.id===c.id) s-=4*W.mira;
       if(avvFinito) s+=3.5*W.attesa;
       if(ultimo) s+=1.2;
-      return s;
+      return s*_d;
     }
 
-    if(m.ruolo==='equipaggiamento'){
+    if(m.ruolo==='equipaggiamento'){ const _d=W.duello;
       const cav=v.campo.cav,b=cav.s===ac.s?1:0;
       const prima=Math.abs(BERSAGLIO-(cav.v+b)), dopo=Math.abs(BERSAGLIO-(cav.v+b+c.v));
       let s = 3 + (prima-dopo)*2.6*W.mira;
       if(dopo===0)s+=3*W.mira;
       if(dopo>prima)s-=6*W.mira;
-      return s;
+      return s*_d;
     }
     return 0;
   };
@@ -369,7 +376,7 @@ function botMossa(g,livello){
 
 /** La scelta della Staffetta per il bot: pescare o scartare, mai nessuna delle due. */
 function sceltaStaffettaBot(g,p,livello){
-  const W=PROFILI[livello]||PROFILI.normale;
+  const W=PROFILI[livello]||PROFILI.cavaliere;
   const v=g.v[p], ultimo=g.giostra===3, ac=g.assoCorrente, an=g.assoNemico;
   if(!v.mano.length) return {tipo:'pesca'};
   const peso=c=>{
@@ -394,7 +401,7 @@ function sceltaStaffettaBot(g,p,livello){
 
 /** LA CONTA del bot: scarta le carte meno utili. */
 function botConta(g,livello){
-  const W=PROFILI[livello]||PROFILI.normale;
+  const W=PROFILI[livello]||PROFILI.cavaliere;
   const v=g.v[BOT],ac=g.assoCorrente,an=g.assoNemico;
   const extra=v.mano.length-6;
   if(extra<=0)return[];
@@ -442,10 +449,10 @@ function vista(g, p, ultima){
     attesa: g.attesa ? {p: g.attesa.p===p?0:1} : null,
     v:[
       {nome:'Tu', pf:mio.pf, passato:mio.passato, contaFatta:!!mio.contaFatta,
-       mano:mio.mano.slice(), carovana:riempi(mio.carovana.length),
+       mano:mio.mano.slice(), carovana:riempi(mio.carovana.length), scarti:mio.scarti.slice(),
        campo:vistaCampo(mio.campo, true)},
       {nome:'Avversario', pf:suo.pf, passato:suo.passato, contaFatta:!!suo.contaFatta,
-       mano:riempi(suo.mano.length), carovana:riempi(suo.carovana.length),
+       mano:riempi(suo.mano.length), carovana:riempi(suo.carovana.length), scarti:riempi(suo.scarti.length),
        campo:vistaCampo(suo.campo, fine)}
     ]
   };
@@ -489,6 +496,7 @@ export class Partita {
     this.sedi=[null,null];      // token dei due posti
     this.ws=[null,null];
     this.pronti=[false,false];
+    this.diario=[]; this.inizio=Date.now(); this.archiviata=false;
   }
 
   async fetch(req){
@@ -532,6 +540,7 @@ export class Partita {
     try{
       switch(a.t){
         case 'draft':
+          if(g.fase==='draft')this.diario.push(`d${p}:${a.i}`);
           if(g.fase!=='draft'||g.turno!==p) return;
           this.ultima={gruppo:g.gruppoIdx, i:a.i, chi:p};
           prendiInDraft(g,p,a.i);
@@ -547,17 +556,24 @@ export class Partita {
           break;
         case 'gioca':
           if(g.fase!=='giostra'||g.turno!==p||g.attesa) return;
-          gioca(g,p,a.id,a.ruolo);
+          {const av=g.v[1-p], prima=!!av.campo.scu;
+           const ev=gioca(g,p,a.id,a.ruolo);
+           if(this.gio){this.gio.mosse.push(`${p}:${a.ruolo}:${a.id}`);
+             if(prima&&!av.campo.scu)this.gio.eliminati++;}}
           this.dopoMossa();
           break;
         case 'staffetta':
           if(!g.attesa||g.attesa.p!==p) return;
           risolviStaffetta(g,a.scelta||{tipo:'pesca'});
+          if(this.gio){const t=(a.scelta||{}).tipo;
+            if(t==='scarta')this.gio.staffScarta++;else this.gio.staffPesca++;
+            this.gio.mosse.push(`${p}:staffetta:${t||'pesca'}`);}
           this.dopoMossa();
           break;
         case 'passa':
           if(g.fase!=='giostra'||g.turno!==p||g.attesa) return;
           passa(g,p);
+          if(this.gio)this.gio.mosse.push(`${p}:passa`);
           this.dopoMossa();
           break;
         case 'avanti':
@@ -573,8 +589,54 @@ export class Partita {
     this.trasmetti();
   }
 
-  apriGiostra(){ iniziaGiostra(this.g); this.R=null; this.ultima=null; }
-  dopoMossa(){ if(this.g.fase==='applausi') this.R=applausi(this.g); }
+  apriGiostra(){
+    iniziaGiostra(this.g); this.R=null; this.ultima=null;
+    this.gio={corrente:this.g.assoCorrente.s, nemico:this.g.assoNemico.s,
+      mosse:[], eliminati:0, staffPesca:0, staffScarta:0};
+    (this.g.registro=this.g.registro||[]).push(this.gio);
+  }
+  dopoMossa(){
+    if(this.g.fase!=='applausi')return;
+    this.R=applausi(this.g);
+    const R=this.R, g=this.g;
+    this.gio.campi=g.v.map(v=>({
+      cav:v.campo.cav?v.campo.cav.id:null, scu:v.campo.scu?v.campo.scu.id:null,
+      equ:v.campo.equ?v.campo.equ.id:null, giullari:v.campo.giullari.map(c=>c.id)}));
+    this.gio.punti=[
+      {scu:R.scudieri.vincitore===0?PF_SCU:0, cav:R.cavalieri.vincitore===0?PF_CAV:0, istr:R.istrione.a.tot},
+      {scu:R.scudieri.vincitore===1?PF_SCU:0, cav:R.cavalieri.vincitore===1?PF_CAV:0, istr:R.istrione.b.tot}];
+    this.gio.vincitori={scu:R.scudieri.vincitore, cav:R.cavalieri.vincitore};
+    this.gio.spareggio=!!R.cavalieri.spareggio;
+    this.gio.perfetti=[R.cavalieri.a,R.cavalieri.b].filter(c=>c&&c.dist===0).length;
+    if(g.fase==='fine') this.archivia();
+  }
+
+  /** Il resoconto della partita, scritto dall'arbitro. */
+  async archivia(){
+    if(this.archiviata)return; this.archiviata=true;
+    const g=this.g;
+    const comp=v=>({s8:v.filter(c=>c.v===8).length, s9:v.filter(c=>c.v===9).length,
+      s10:v.filter(c=>c.v===10).length, basse:v.filter(c=>c.v<8).length});
+    const res={
+      v:1, tipo:'persone', draft:'completo', fine:Date.now(),
+      durata:Math.round((Date.now()-this.inizio)/1000),
+      mappa:g.mappa.map(a=>a.s),
+      viandanti:[0,1].map(i=>{
+        const tutte=[...g.v[i].carovana,...g.v[i].mano,...g.v[i].scarti,
+          ...[g.v[i].campo.cav,g.v[i].campo.scu,g.v[i].campo.equ].filter(Boolean),
+          ...g.v[i].campo.giullari];
+        return {carovana:tutte.map(c=>c.id), comp:comp(tutte),
+          mucchio:(g.iniziali&&g.iniziali[i]||[]).map(x=>x.c.id),
+          pf:g.v[i].pf, manoFine:g.v[i].mano.length};
+      }),
+      giostre:g.registro||[], mosse:this.diario
+    };
+    try{
+      const id=this.env.ARCHIVIO.idFromName('unico');
+      await this.env.ARCHIVIO.get(id).fetch(new Request('https://x/archivio',
+        {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(res)}));
+    }catch(e){}
+  }
 
   manda(ws,o){ if(!ws) return; try{ ws.send(JSON.stringify(o)); }catch(e){} }
 
@@ -597,13 +659,178 @@ export default {
     const intestazioni={'Access-Control-Allow-Origin':'*',
       'Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'GET,OPTIONS'};
     if(req.method==='OPTIONS') return new Response(null,{headers:intestazioni});
+    if(u.pathname==='/archivio'||u.pathname==='/statistiche'||u.pathname==='/csv'||u.pathname==='/partita'){
+      const id=env.ARCHIVIO.idFromName('unico');
+      return env.ARCHIVIO.get(id).fetch(req);
+    }
     if(u.pathname==='/ws'){
       const codice=(u.searchParams.get('codice')||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
       if(codice.length<4) return new Response('codice non valido',{status:400,headers:intestazioni});
       const id=env.PARTITA.idFromName(codice);
       return env.PARTITA.get(id).fetch(req);
     }
-    return new Response('Carovana — server delle partite. Il gioco sta altrove.',
-      {headers:{...intestazioni,'content-type':'text/plain; charset=utf-8'}});
+    const id=env.ARCHIVIO.idFromName('unico');
+    return env.ARCHIVIO.get(id).fetch(new Request(new URL('/statistiche',u).toString(),req));
   }
 };
+
+/* ==========================================================================
+   5. L'ARCHIVIO — un Durable Object che conserva i resoconti delle partite
+   ========================================================================== */
+
+export class Archivio {
+  constructor(state){ this.state=state; }
+
+  async fetch(req){
+    const u=new URL(req.url);
+    const CORS={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*',
+      'Access-Control-Allow-Methods':'GET,POST,OPTIONS'};
+    if(req.method==='OPTIONS')return new Response(null,{headers:CORS});
+
+    if(u.pathname==='/archivio'&&req.method==='POST'){
+      let r; try{ r=await req.json(); }catch(e){ return new Response('json non valido',{status:400,headers:CORS}); }
+      if(!r||!r.viandanti||r.viandanti.length!==2)return new Response('resoconto incompleto',{status:400,headers:CORS});
+      const n=((await this.state.storage.get('n'))||0)+1;
+      r.n=n; r.salvata=Date.now();
+      await this.state.storage.put('p:'+String(n).padStart(7,'0'), r);
+      await this.state.storage.put('n',n);
+      return new Response(JSON.stringify({ok:true,n}),{headers:{...CORS,'content-type':'application/json'}});
+    }
+    const tutte=await this.leggi();
+    if(u.pathname==='/csv')
+      return new Response(csv(tutte),{headers:{...CORS,
+        'content-type':'text/csv; charset=utf-8',
+        'content-disposition':'attachment; filename="carovana.csv"'}});
+    if(u.pathname==='/partita'){
+      const n=u.searchParams.get('n');
+      const una=tutte.find(x=>String(x.n)===String(n));
+      return new Response(JSON.stringify(una||{errore:'non trovata'},null,2),
+        {headers:{...CORS,'content-type':'application/json; charset=utf-8'}});
+    }
+    return new Response(pagina(tutte),{headers:{...CORS,'content-type':'text/html; charset=utf-8'}});
+  }
+
+  async leggi(){
+    const m=await this.state.storage.list({prefix:'p:',reverse:true,limit:1000});
+    return [...m.values()];
+  }
+}
+
+/* --- statistiche ------------------------------------------------------- */
+const med=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
+const pc=(a,b)=>b?(100*a/b).toFixed(1)+'%':'—';
+
+function riassunto(P){
+  const g=P.flatMap(p=>p.giostre||[]);
+  const vi=P.flatMap(p=>p.viandanti||[]);
+  const pf=vi.map(v=>v.pf);
+  const scarti=P.map(p=>Math.abs(p.viandanti[0].pf-p.viandanti[1].pf));
+  const punti=k=>med(g.flatMap(x=>x.punti.map(y=>y[k])));
+  const tot=punti('scu')+punti('cav')+punti('istr');
+  return {
+    partite:P.length, giostre:g.length,
+    comp:{
+      s8:med(vi.map(v=>v.comp.s8)), s9:med(vi.map(v=>v.comp.s9)),
+      s10:med(vi.map(v=>v.comp.s10)), basse:med(vi.map(v=>v.comp.basse))
+    },
+    scu:punti('scu'), cav:punti('cav'), istr:punti('istr'), tot,
+    pesoScu:pc(punti('scu'),tot), pesoCav:pc(punti('cav'),tot), pesoIstr:pc(punti('istr'),tot),
+    nulloScu:pc(g.filter(x=>x.vincitori.scu===null).length,g.length),
+    nulloCav:pc(g.filter(x=>x.vincitori.cav===null).length,g.length),
+    spareggi:pc(g.filter(x=>x.spareggio).length,g.length),
+    perfetti:pc(g.reduce((a,x)=>a+x.perfetti,0), g.length*2),
+    elim:med(P.map(p=>(p.giostre||[]).reduce((a,x)=>a+x.eliminati,0))),
+    staffPesca:g.reduce((a,x)=>a+(x.staffPesca||0),0),
+    staffScarta:g.reduce((a,x)=>a+(x.staffScarta||0),0),
+    pfMedio:med(pf), pfMax:pf.length?Math.max(...pf):0, pfMin:pf.length?Math.min(...pf):0,
+    scartoMedio:med(scarti), tirate:pc(scarti.filter(x=>x<=3).length,scarti.length),
+    manoFine:med(vi.map(v=>v.manoFine))
+  };
+}
+
+function tabella(t,r){
+  if(!r.partite)return `<h2>${t}</h2><p class="vuoto">Nessuna partita registrata.</p>`;
+  return `<h2>${t}</h2>
+  <p class="sotto">${r.partite} partite · ${r.giostre} giostre</p>
+  <table>
+    <tr><th>Carovana media</th><td>${r.comp.s8.toFixed(1)} Staffette · ${r.comp.s9.toFixed(1)} Guastafeste · ${r.comp.s10.toFixed(1)} Capocomici · ${r.comp.basse.toFixed(1)} carte 2-7</td></tr>
+    <tr><th>Miglior Scudiero</th><td>${r.scu.toFixed(2)} per giostra <span class="q">(${r.pesoScu} del totale)</span></td></tr>
+    <tr><th>Giostra dei Cavalieri</th><td>${r.cav.toFixed(2)} per giostra <span class="q">(${r.pesoCav})</span></td></tr>
+    <tr><th>Istrione del Regno</th><td>${r.istr.toFixed(2)} per giostra <span class="q">(${r.pesoIstr})</span></td></tr>
+    <tr><th>Giostre senza vincitore</th><td>Scudieri ${r.nulloScu} · Cavalieri ${r.nulloCav}</td></tr>
+    <tr><th>Spareggio di seme</th><td>${r.spareggi} delle giostre</td></tr>
+    <tr><th>Cavalieri a 8 esatto</th><td>${r.perfetti} degli schieramenti</td></tr>
+    <tr><th>Scudieri eliminati dal 9</th><td>${r.elim.toFixed(2)} per partita</td></tr>
+    <tr><th>La Staffetta sceglie</th><td>${r.staffPesca} volte di pescare, ${r.staffScarta} di scartare</td></tr>
+    <tr><th>Punti Favore finali</th><td>media ${r.pfMedio.toFixed(1)} · da ${r.pfMin} a ${r.pfMax}</td></tr>
+    <tr><th>Scarto fra i due</th><td>${r.scartoMedio.toFixed(1)} in media · ${r.tirate} finite entro 3 punti</td></tr>
+    <tr><th>Carte in mano alla fine</th><td>${r.manoFine.toFixed(2)}</td></tr>
+  </table>`;
+}
+
+function pagina(P){
+  const bot=P.filter(p=>p.tipo==='bot'), due=P.filter(p=>p.tipo==='persone');
+  const righe=P.slice(0,60).map(p=>{
+    const [a,b]=p.viandanti;
+    const d=new Date(p.fine||p.salvata);
+    return `<tr><td>${p.n}</td><td>${d.toLocaleString('it-IT')}</td>
+      <td>${p.tipo==='bot'?'contro il Bot':'due persone'}</td>
+      <td>${p.draft==='rapido'?'rapido':'completo'}</td>
+      <td class="n">${a.pf} — ${b.pf}</td>
+      <td>${a.comp.s8}·${a.comp.s9}·${a.comp.s10} / ${b.comp.s8}·${b.comp.s9}·${b.comp.s10}</td>
+      <td><a href="/partita?n=${p.n}">dati</a></td></tr>`;}).join('');
+  return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Carovana — l'archivio dei viaggi</title>
+<style>
+:root{--oro:#d9b45a;--oro2:#f0d488;--crema:#f2ead7}
+body{font-family:"Iowan Old Style",Palatino,Georgia,serif;background:#1b2b21;color:var(--crema);
+  margin:0;padding:28px 20px 60px;line-height:1.6}
+.w{max-width:900px;margin:0 auto}
+h1{color:var(--oro2);font-size:30px;margin:0 0 4px;font-weight:600}
+h2{color:var(--oro2);font-size:19px;margin:34px 0 6px;font-weight:600}
+.sub{letter-spacing:.2em;text-transform:uppercase;font-size:12px;opacity:.55;margin-bottom:22px}
+.sotto{font-size:13px;opacity:.6;margin:0 0 10px}
+.vuoto{opacity:.5;font-style:italic}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-weight:400;opacity:.65;width:230px;vertical-align:top;padding:6px 10px 6px 0}
+td{padding:6px 0;border-bottom:1px solid rgba(240,212,136,.1)}
+.q{opacity:.5;font-size:12.5px}
+.el td,.el th{font-size:13px;padding:5px 8px 5px 0}
+.el th{width:auto;opacity:.5;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+.n{font-variant-numeric:tabular-nums;color:var(--oro2)}
+a{color:var(--oro)}
+.avv{font-size:13px;opacity:.7;border-left:2px solid rgba(240,212,136,.3);padding-left:12px;margin:18px 0}
+.giu{display:flex;gap:14px;margin-top:24px;flex-wrap:wrap}
+.giu a{border:1px solid rgba(240,212,136,.35);padding:7px 14px;border-radius:5px;text-decoration:none}
+</style></head><body><div class="w">
+<h1>L'archivio dei viaggi</h1>
+<div class="sub">Carovana — Duel Card Game</div>
+<p class="sotto">${P.length} partite registrate in tutto.</p>
+${tabella('Persona contro il Bot',riassunto(bot))}
+<p class="avv">Questi resoconti li manda il browser di chi gioca: la partita contro il Bot
+si svolge tutta lì e nessun arbitro può verificarla.</p>
+${tabella('Persona contro persona',riassunto(due))}
+<p class="avv">Questi invece li scrive il server, che arbitra la partita e vede tutto.
+Sono dati verificati.</p>
+<h2>Le ultime partite</h2>
+<table class="el"><tr><th>n</th><th>quando</th><th>tipo</th><th>draft</th><th>punteggio</th><th>figure</th><th></th></tr>${righe||'<tr><td colspan="7" class="vuoto">niente da mostrare</td></tr>'}</table>
+<div class="giu"><a href="/csv">Scarica tutto in CSV</a></div>
+</div></body></html>`;
+}
+
+function csv(P){
+  const c=[['n','quando','tipo','draft','pf1','pf2','vincitore',
+    'v1_staffette','v1_guastafeste','v1_capocomici','v1_basse','v1_mano_fine',
+    'v2_staffette','v2_guastafeste','v2_capocomici','v2_basse','v2_mano_fine',
+    'v1_carovana','v2_carovana'].join(',')];
+  for(const p of P){
+    const[a,b]=p.viandanti;
+    c.push([p.n,new Date(p.fine||p.salvata).toISOString(),p.tipo,p.draft,a.pf,b.pf,
+      a.pf>b.pf?1:b.pf>a.pf?2:0,
+      a.comp.s8,a.comp.s9,a.comp.s10,a.comp.basse,a.manoFine,
+      b.comp.s8,b.comp.s9,b.comp.s10,b.comp.basse,b.manoFine,
+      '"'+(a.carovana||[]).join(' ')+'"','"'+(b.carovana||[]).join(' ')+'"'].join(','));
+  }
+  return c.join('\n');
+}
