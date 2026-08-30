@@ -535,7 +535,11 @@ export class Partita {
           if(g.fase!=='draft'||g.turno!==p) return;
           this.ultima={gruppo:g.gruppoIdx, i:a.i, chi:p};
           prendiInDraft(g,p,a.i);
-          if(g.fase==='pronti') this.apriGiostra();
+          break;
+        case 'inizia':
+          // il via lo dà chi ha creato la partita
+          if(p!==0||g.fase!=='pronti') return;
+          this.apriGiostra();
           break;
         case 'conta':
           if(g.fase!=='conta'||g.v[p].contaFatta) return;
