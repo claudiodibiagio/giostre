@@ -1,4 +1,4 @@
-name = "carovana"
+name = "giostre"
 main = "worker.js"
 compatibility_date = "2026-08-01"
 
@@ -10,6 +10,13 @@ class_name = "Partita"
 name = "ARCHIVIO"
 class_name = "Archivio"
 
+# Le migrazioni sono cumulative e Cloudflare non riesegue quelle già applicate:
+# la v1 risulta fatta dal primo deploy, quindi la classe nuova va introdotta
+# con un tag mai usato prima.
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["Partita", "Archivio"]
+new_sqlite_classes = ["Partita"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Archivio"]
