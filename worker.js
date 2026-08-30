@@ -837,15 +837,24 @@ function sezioneClassifica(P){
   </div>`;
 }
 
+/* Etichetta del pacchetto. Le partite registrate prima che l'archivio
+   distinguesse le regole, e quelle marcate "A", sono state giocate con
+   le stesse regole di oggi: confluiscono tutte nel pacchetto 1.0. */
+const DATE_PACCHETTI={'1.0':'30/08/2026'};
+function etichetta(p){
+  const v=(p.regole&&p.regole.v)||'';
+  return (!v||v==='A') ? '1.0' : v;
+}
+
 function pacchetti(P){
   const m=new Map();
   for(const p of P){
-    let v=(p.regole&&p.regole.v)||'—';
-    if(v==='A')v='1.0';   // etichetta iniziale, poi rinominata
+    const v=etichetta(p);
     if(!m.has(v))m.set(v,{v,regole:p.regole||null,data:null,partite:[]});
     const e=m.get(v);
     if(!e.regole&&p.regole)e.regole=p.regole;
     if(!e.data&&p.regole&&p.regole.data)e.data=p.regole.data;
+    if(!e.data&&DATE_PACCHETTI[v])e.data=DATE_PACCHETTI[v];
     e.partite.push(p);
   }
   return [...m.values()].sort((a,b)=>b.partite[0].salvata-a.partite[0].salvata);
@@ -857,7 +866,7 @@ function sezionePacchetto(pk,attuale){
   const r=pk.regole;
   const par=r?`Scudiero +${r.scu} · Cavaliere +${r.cav} · bersaglio ${r.bersaglio} ·
       pesca ${r.pesca}, tetto ${r.tetto}${r.note?'<br><span class="q">'+r.note+'</span>':''}`
-    : 'Partite registrate prima che l\'archivio distinguesse i pacchetti di regole.';
+    : 'Regole di partenza. Le partite più vecchie non portavano l\'impronta, ma sono state giocate con questi stessi parametri.';
   return `<div class="pk${attuale?' ora':''}">
     <h2>Pacchetto ${pk.v}${pk.data?' · '+esc(pk.data):''}${attuale?' <span class="tag">in corso</span>':''}</h2>
     <p class="sotto">${pk.partite.length} partite · ${par}</p>
@@ -890,7 +899,7 @@ function pagina(P,gioco){
       return `<tr><td><a href="/partita?n=${p.n}" title="resoconto n. ${p.n}">${i+1}</a></td>
         <td>${d.toLocaleString('it-IT')}</td>
         <td>${giocatori(p)}</td>
-        <td>${(p.regole&&p.regole.v)||'—'}</td>
+        <td>${etichetta(p)}</td>
         <td>${p.draft==='rapido'?'rapido':'completo'}</td>
         <td class="n">${a.pf} — ${b.pf}</td>
         <td>${a.comp.s8}·${a.comp.s9}·${a.comp.s10} / ${b.comp.s8}·${b.comp.s9}·${b.comp.s10}</td>
@@ -969,7 +978,7 @@ function csv(P){
     'v1_carovana','v2_carovana'].join(',')];
   for(const p of P){
     const[a,b]=p.viandanti;
-    c.push([p.n,new Date(p.fine||p.salvata).toISOString(),p.tipo,(p.regole&&p.regole.v)||'',p.draft,a.pf,b.pf,
+    c.push([p.n,new Date(p.fine||p.salvata).toISOString(),p.tipo,etichetta(p),p.draft,a.pf,b.pf,
       a.pf>b.pf?1:b.pf>a.pf?2:0,
       a.comp.s8,a.comp.s9,a.comp.s10,a.comp.basse,a.manoFine,
       b.comp.s8,b.comp.s9,b.comp.s10,b.comp.basse,b.manoFine,
