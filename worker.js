@@ -840,7 +840,8 @@ function sezioneClassifica(P){
 function pacchetti(P){
   const m=new Map();
   for(const p of P){
-    const v=(p.regole&&p.regole.v)||'—';
+    let v=(p.regole&&p.regole.v)||'—';
+    if(v==='A')v='1.0';   // etichetta iniziale, poi rinominata
     if(!m.has(v))m.set(v,{v,regole:p.regole||null,data:null,partite:[]});
     const e=m.get(v);
     if(!e.regole&&p.regole)e.regole=p.regole;
@@ -883,10 +884,10 @@ function pagina(P,gioco){
   const pks=pacchetti(P);
   const bot=P.filter(p=>p.tipo==='bot'), due=P.filter(p=>p.tipo==='persone');
   const elenco=(lista,titolo,vuoto)=>{
-    const righe=lista.slice().reverse().slice(0,150).map(p=>{
+    const righe=lista.slice().reverse().slice(0,150).map((p,i)=>{
       const [a,b]=p.viandanti;
       const d=new Date(p.fine||p.salvata);
-      return `<tr><td><a href="/partita?n=${p.n}">${p.n}</a></td>
+      return `<tr><td><a href="/partita?n=${p.n}" title="resoconto n. ${p.n}">${i+1}</a></td>
         <td>${d.toLocaleString('it-IT')}</td>
         <td>${giocatori(p)}</td>
         <td>${(p.regole&&p.regole.v)||'—'}</td>
