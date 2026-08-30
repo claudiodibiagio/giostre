@@ -769,16 +769,16 @@ function tabella(t,r){
   <p class="sotto">${r.partite} partite · ${r.giostre} giostre</p>
   <table>
     <tr><th>Carovana media</th><td>${r.comp.s8.toFixed(1)} Staffette · ${r.comp.s9.toFixed(1)} Guastafeste · ${r.comp.s10.toFixed(1)} Capocomici · ${r.comp.basse.toFixed(1)} carte 2-7</td></tr>
-    <tr><th>Miglior Scudiero<br><span class="pic">(per giostra, per singolo viandante)</span></th><td>${r.scu.toFixed(2)} per giostra <span class="q">(${r.pesoScu} del totale)</span></td></tr>
-    <tr><th>Giostra dei Cavalieri<br><span class="pic">(per giostra, per singolo viandante)</span></th><td>${r.cav.toFixed(2)} per giostra <span class="q">(${r.pesoCav})</span></td></tr>
-    <tr><th>Istrione del Regno<br><span class="pic">(per giostra, per singolo viandante)</span></th><td>${r.istr.toFixed(2)} per giostra <span class="q">(${r.pesoIstr})</span></td></tr>
+    <tr><th>Miglior Scudiero<br><span class="pic">(per giostra, per singolo viandante)</span></th><td>${r.scu.toFixed(2)} Punti Favore per giostra <span class="q">(${r.pesoScu} del totale)</span></td></tr>
+    <tr><th>Giostra dei Cavalieri<br><span class="pic">(per giostra, per singolo viandante)</span></th><td>${r.cav.toFixed(2)} Punti Favore per giostra <span class="q">(${r.pesoCav})</span></td></tr>
+    <tr><th>Istrione del Regno<br><span class="pic">(per giostra, per singolo viandante)</span></th><td>${r.istr.toFixed(2)} Punti Favore per giostra <span class="q">(${r.pesoIstr})</span></td></tr>
     <tr><th>Giostre senza vincitore</th><td>Scudieri ${r.nulloScu} · Cavalieri ${r.nulloCav}</td></tr>
     <tr><th>Spareggio di seme</th><td>${r.spareggi} delle giostre</td></tr>
     <tr><th>Cavalieri a 8 esatto</th><td>${r.perfetti} degli schieramenti</td></tr>
     <tr><th>Scudieri eliminati dal 9<br><span class="pic">(in totale in una partita)</span></th><td>${r.elim.toFixed(2)} per partita</td></tr>
     <tr><th>La Staffetta sceglie<br><span class="pic">(in assoluto)</span></th><td>${r.staffPesca} volte di pescare, ${r.staffScarta} di scartare</td></tr>
-    <tr><th>Punti Favore finali</th><td>media ${r.pfMedio.toFixed(1)} · da ${r.pfMin} a ${r.pfMax}</td></tr>
-    <tr><th>Scarto fra i due</th><td>${r.scartoMedio.toFixed(1)} in media · ${r.tirate} finite entro 3 punti</td></tr>
+    <tr><th>Punti Favore finali</th><td>media ${r.pfMedio.toFixed(1)} Punti Favore · da ${r.pfMin} a ${r.pfMax}</td></tr>
+    <tr><th>Scarto fra i due</th><td>${r.scartoMedio.toFixed(1)} Punti Favore in media · ${r.tirate} finite entro 3 punti</td></tr>
     <tr><th>Carte in mano alla fine</th><td>${r.manoFine.toFixed(2)}</td></tr>
   </table>`;
 }
@@ -841,8 +841,11 @@ function pacchetti(P){
   const m=new Map();
   for(const p of P){
     const v=(p.regole&&p.regole.v)||'—';
-    if(!m.has(v))m.set(v,{v,regole:p.regole||null,partite:[]});
-    m.get(v).partite.push(p);
+    if(!m.has(v))m.set(v,{v,regole:p.regole||null,data:null,partite:[]});
+    const e=m.get(v);
+    if(!e.regole&&p.regole)e.regole=p.regole;
+    if(!e.data&&p.regole&&p.regole.data)e.data=p.regole.data;
+    e.partite.push(p);
   }
   return [...m.values()].sort((a,b)=>b.partite[0].salvata-a.partite[0].salvata);
 }
@@ -855,11 +858,17 @@ function sezionePacchetto(pk,attuale){
       pesca ${r.pesca}, tetto ${r.tetto}${r.note?'<br><span class="q">'+r.note+'</span>':''}`
     : 'Partite registrate prima che l\'archivio distinguesse i pacchetti di regole.';
   return `<div class="pk${attuale?' ora':''}">
-    <h2>Pacchetto ${pk.v}${attuale?' <span class="tag">in corso</span>':''}</h2>
+    <h2>Pacchetto ${pk.v}${pk.data?' · '+esc(pk.data):''}${attuale?' <span class="tag">in corso</span>':''}</h2>
     <p class="sotto">${pk.partite.length} partite · ${par}</p>
     ${tabella('Persona contro il Bot',riassunto(bot))}
     ${tabella('Persona contro persona',riassunto(due))}
   </div>`;
+}
+
+function giocatori(p){
+  const [a,b]=p.viandanti;
+  if(p.tipo==='bot')return 'una persona <span class="q">contro</span> il Bot';
+  return `${esc(a.nome||'Anonimo')} <span class="q">contro</span> ${esc(b.nome||'Anonimo')}`;
 }
 
 function vincitore(p){
@@ -873,15 +882,23 @@ function vincitore(p){
 function pagina(P,gioco){
   const pks=pacchetti(P);
   const bot=P.filter(p=>p.tipo==='bot'), due=P.filter(p=>p.tipo==='persone');
-  const righe=P.slice().reverse().slice(0,150).map(p=>{
-    const [a,b]=p.viandanti;
-    const d=new Date(p.fine||p.salvata);
-    return `<tr><td><a href="/partita?n=${p.n}">${p.n}</a></td><td>${d.toLocaleString('it-IT')}</td>
-      <td>${p.tipo==='bot'?'contro il Bot':'due persone'}</td>
-      <td>${(p.regole&&p.regole.v)||'—'}</td><td>${p.draft==='rapido'?'rapido':'completo'}</td>
-      <td class="n">${a.pf} — ${b.pf}</td>
-      <td>${a.comp.s8}·${a.comp.s9}·${a.comp.s10} / ${b.comp.s8}·${b.comp.s9}·${b.comp.s10}</td>
-      <td>${vincitore(p)}</td></tr>`;}).join('');
+  const elenco=(lista,titolo,vuoto)=>{
+    const righe=lista.slice().reverse().slice(0,150).map(p=>{
+      const [a,b]=p.viandanti;
+      const d=new Date(p.fine||p.salvata);
+      return `<tr><td><a href="/partita?n=${p.n}">${p.n}</a></td>
+        <td>${d.toLocaleString('it-IT')}</td>
+        <td>${giocatori(p)}</td>
+        <td>${(p.regole&&p.regole.v)||'—'}</td>
+        <td>${p.draft==='rapido'?'rapido':'completo'}</td>
+        <td class="n">${a.pf} — ${b.pf}</td>
+        <td>${a.comp.s8}·${a.comp.s9}·${a.comp.s10} / ${b.comp.s8}·${b.comp.s9}·${b.comp.s10}</td>
+        <td>${vincitore(p)}</td></tr>`;}).join('');
+    return `<h3>${titolo}</h3><table class="el">
+      <tr><th>n</th><th>quando</th><th>viandanti</th><th>regole</th><th>draft</th>
+      <th>punteggio</th><th>figure</th><th>vincitore</th></tr>
+      ${righe||`<tr><td colspan="8" class="vuoto">${vuoto}</td></tr>`}</table>`;
+  };
   return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Carovana — l'archivio dei viaggi</title>
@@ -937,8 +954,9 @@ la partita si svolge tutta lì e nessun arbitro può verificarla. Quelli fra due
 li scrive il server, che arbitra e vede tutto: sono dati verificati.</p>
 ${sezioneClassifica(P)}
 ${pks.map((pk,i)=>sezionePacchetto(pk,i===0)).join('')}
-<h2>Le ultime partite</h2>
-<table class="el"><tr><th>n</th><th>quando</th><th>tipo</th><th>regole</th><th>draft</th><th>punteggio</th><th>figure</th><th>vincitore</th></tr>${righe||'<tr><td colspan="8" class="vuoto">niente da mostrare</td></tr>'}</table>
+<h2>Le partite giocate</h2>
+${elenco(due,'Persona contro persona','Nessuna partita fra persone, per ora.')}
+${elenco(bot,'Persona contro il Bot','Nessuna partita contro il Bot, per ora.')}
 <div class="giu"><a href="${gioco}">← Torna al gioco</a><a href="/csv">Scarica tutto in CSV</a></div>
 </div></body></html>`;
 }
