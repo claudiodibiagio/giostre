@@ -27,13 +27,21 @@ function nuovaPartita({seed=Date.now()&0xffff,primo=0,nomi=['Tu','Bot']}={}){
     primoDraft:primo,turno:primo,fase:'draft',attesa:null,log:[]};
 }
 function creaDraft(g){
-  const m=mischia(mazzoCompleto(),g.rnd);g.gruppi=[];
-  for(let i=0;i<6;i++){
-    const c=m.slice(i*6,i*6+6), nCop=i<5?2:0;
-    const sc=mischia(c.map((_,k)=>k),g.rnd).slice(0,nCop);
-    g.gruppi.push(c.map((x,k)=>({c:x,coperta:sc.includes(k),presa:null})));
+  const m=mischia(mazzoCompleto(),g.rnd);
+  // 1. l'approdo: sei carte a testa, quattro scoperte e due coperte
+  g.iniziali=[[],[]];
+  for(const p of [0,1]){
+    const sei=m.splice(0,6);
+    const cop=mischia([0,1,2,3,4,5],g.rnd).slice(0,2);
+    g.iniziali[p]=sei.map((c,k)=>({c,coperta:cop.includes(k)}));
+    g.v[p].carovana.push(...sei);
   }
-  g.gruppoIdx=0;g.turno=g.primoDraft;return g;
+  // 2. due gruppi da dodici: riga alta scoperta, riga di mezzo coperta, riga bassa scoperta
+  g.gruppi=[];
+  for(let i=0;i<2;i++)
+    g.gruppi.push(m.splice(0,12).map((c,k)=>({c,coperta:k>=4&&k<8,presa:null})));
+  g.gruppoIdx=0;g.turno=g.primoDraft;
+  return g;
 }
 function prendiInDraft(g,p,i){
   if(g.fase!=='draft')throw new Error('il draft è già concluso');
@@ -44,8 +52,8 @@ function prendiInDraft(g,p,i){
   sl.presa=p;g.v[p].carovana.push(sl.c);   // se era coperta resta coperta
   if(gr.every(s=>s.presa!==null)){
     g.gruppoIdx++;
-    if(g.gruppoIdx>=6){for(const v of g.v)v.carovana=mischia(v.carovana,g.rnd);g.fase='pronti';}
-    else g.turno=g.gruppoIdx%2===0?g.primoDraft:1-g.primoDraft;
+    if(g.gruppoIdx>=2){for(const v of g.v)v.carovana=mischia(v.carovana,g.rnd);g.fase='pronti';}
+    else g.turno=1-g.primoDraft;            // il secondo gruppo lo apre l'altro
   } else g.turno=1-g.turno;
   return g;
 }
@@ -444,6 +452,11 @@ function vista(g, p, ultima){
   if(g.fase==='draft'){
     V.gruppoIdx=g.gruppoIdx;
     V.v[0].carovana=mio.carovana.slice();      // durante il draft vedo le mie
+    // l'approdo: le mie sei le posso sbirciare, delle sue vedo solo le scoperte
+    V.iniziali=[
+      g.iniziali[p].map(x=>({c:x.c, coperta:x.coperta})),
+      g.iniziali[av].map(x=>({c:x.coperta?NASCOSTA:x.c, coperta:x.coperta}))
+    ];
     V.gruppi=g.gruppi.map(gr=>gr.map(sl=>({
       coperta:sl.coperta,
       presa: sl.presa===null?null:(sl.presa===p?0:1),
