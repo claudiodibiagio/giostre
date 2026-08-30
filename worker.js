@@ -696,6 +696,10 @@ export class Archivio {
       await this.state.storage.put('n',n);
       return new Response(JSON.stringify({ok:true,n}),{headers:{...CORS,'content-type':'application/json'}});
     }
+    // da dove si torna al gioco: lo dice il gioco stesso, con una verifica
+    const grezzo=u.searchParams.get('da')||'';
+    const gioco=/^https:\/\/[A-Za-z0-9._~:\/?#\[\]@!$&'()*+,;=%-]+$/.test(grezzo)
+      ? grezzo : 'https://claudiodibiagio.github.io/index';
     const tutte=await this.leggi();
     if(u.pathname==='/csv')
       return new Response(csv(tutte),{headers:{...CORS,
@@ -707,7 +711,7 @@ export class Archivio {
       return new Response(JSON.stringify(una||{errore:'non trovata'},null,2),
         {headers:{...CORS,'content-type':'application/json; charset=utf-8'}});
     }
-    return new Response(pagina(tutte),{headers:{...CORS,'content-type':'text/html; charset=utf-8'}});
+    return new Response(pagina(tutte,gioco),{headers:{...CORS,'content-type':'text/html; charset=utf-8'}});
   }
 
   async leggi(){
@@ -768,7 +772,7 @@ function tabella(t,r){
   </table>`;
 }
 
-function pagina(P){
+function pagina(P,gioco){
   const bot=P.filter(p=>p.tipo==='bot'), due=P.filter(p=>p.tipo==='persone');
   const righe=P.slice(0,60).map(p=>{
     const [a,b]=p.viandanti;
@@ -803,7 +807,10 @@ a{color:var(--oro)}
 .avv{font-size:13px;opacity:.7;border-left:2px solid rgba(240,212,136,.3);padding-left:12px;margin:18px 0}
 .giu{display:flex;gap:14px;margin-top:24px;flex-wrap:wrap}
 .giu a{border:1px solid rgba(240,212,136,.35);padding:7px 14px;border-radius:5px;text-decoration:none}
+.indietro{display:inline-block;font-size:13px;text-decoration:none;opacity:.75;margin-bottom:16px}
+.indietro:hover{opacity:1}
 </style></head><body><div class="w">
+<a class="indietro" href="${gioco}">← Torna al gioco</a>
 <h1>L'archivio dei viaggi</h1>
 <div class="sub">Carovana — Duel Card Game</div>
 <p class="sotto">${P.length} partite registrate in tutto.</p>
@@ -815,7 +822,7 @@ ${tabella('Persona contro persona',riassunto(due))}
 Sono dati verificati.</p>
 <h2>Le ultime partite</h2>
 <table class="el"><tr><th>n</th><th>quando</th><th>tipo</th><th>draft</th><th>punteggio</th><th>figure</th><th></th></tr>${righe||'<tr><td colspan="7" class="vuoto">niente da mostrare</td></tr>'}</table>
-<div class="giu"><a href="/csv">Scarica tutto in CSV</a></div>
+<div class="giu"><a href="${gioco}">← Torna al gioco</a><a href="/csv">Scarica tutto in CSV</a></div>
 </div></body></html>`;
 }
 
