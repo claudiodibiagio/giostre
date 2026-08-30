@@ -6,7 +6,17 @@ const SEMI=['D','S','C','B'];
 const NOME_SEME={D:'Denari',S:'Spade',C:'Coppe',B:'Bastoni'};
 const NOME_GIU={8:'La Staffetta',9:'Il Guastafeste',10:'Il Capocomico'};
 const NOME_RUOLO={cavaliere:'Cavaliere',scudiero:'Scudiero',equipaggiamento:'Equipaggiamento',giullare:'Giullare'};
-const PF_SCU=4, PF_CAV=6, BERSAGLIO=8;
+const PF_SCU=4, PF_CAV=6, BERSAGLIO=8, PESCA=5, TETTO=6;
+
+/* L'etichetta del pacchetto di regole in corso. Va cambiata ogni volta che
+   si tocca una regola: l'archivio raggruppa le partite per etichetta e i
+   pacchetti vecchi restano dove sono, intatti. */
+const REGOLE='A';
+const NOTE_REGOLE='Staffetta con scelta fra pescare e scartare · Capocomico solo sugli altri Giullari · nessun tetto al Guastafeste';
+function improntaRegole(){
+  return {v:REGOLE, scu:PF_SCU, cav:PF_CAV, bersaglio:BERSAGLIO,
+          pesca:PESCA, tetto:TETTO, note:NOTE_REGOLE};
+}
 const carta=(s,v)=>({s,v,id:s+v});
 const isGiullare=c=>c.v>=8;
 const nomeCarta=c=>(c.v>=8?NOME_GIU[c.v]:c.v)+' di '+NOME_SEME[c.s];
@@ -63,7 +73,7 @@ function iniziaGiostra(g){
   g.assoCorrente=g.mappa[g.iC];g.assoNemico=g.mappa[g.iN];
   for(const v of g.v){v.campo=nuovoCampo();v.passato=false;}
   g.attesa=null;
-  for(const v of g.v)for(let k=0;k<5&&v.carovana.length;k++)v.mano.push(v.carovana.shift());
+  for(const v of g.v)for(let k=0;k<PESCA&&v.carovana.length;k++)v.mano.push(v.carovana.shift());
   g.turno=g.giostra%2===1?g.primoDraft:1-g.primoDraft;
   g.fase='conta';return g;
 }
@@ -71,7 +81,7 @@ function conta(g,p,ids=[]){
   const v=g.v[p];
   for(const id of ids){const k=v.mano.findIndex(c=>c.id===id);
     if(k<0)throw new Error('carta non in mano');v.scarti.push(v.mano.splice(k,1)[0]);}
-  if(v.mano.length>6)throw new Error('devi scendere a 6 carte');
+  if(v.mano.length>TETTO)throw new Error('devi scendere a 6 carte');
   v.contaFatta=true;
   if(g.v.every(x=>x.contaFatta)){g.v.forEach(x=>x.contaFatta=false);g.fase='giostra';}
   return g;
@@ -403,7 +413,7 @@ function sceltaStaffettaBot(g,p,livello){
 function botConta(g,livello){
   const W=PROFILI[livello]||PROFILI.cavaliere;
   const v=g.v[BOT],ac=g.assoCorrente,an=g.assoNemico;
-  const extra=v.mano.length-6;
+  const extra=v.mano.length-TETTO;
   if(extra<=0)return[];
   const peso=c=>{
     if(c.v===10)return 20+v.mano.filter(isGiullare).length*W.combo;
@@ -496,19 +506,19 @@ export class Partita {
     this.sedi=[null,null];      // token dei due posti
     this.ws=[null,null];
     this.pronti=[false,false];
-    this.diario=[]; this.inizio=Date.now(); this.archiviata=false;
+    this.diario=[]; this.inizio=Date.now(); this.archiviata=false; this.nomi=['Anonimo','Anonimo'];
   }
 
   async fetch(req){
     if(req.headers.get('Upgrade')!=='websocket')
       return new Response('Serve una connessione websocket.',{status:426});
-    const token=new URL(req.url).searchParams.get('token')||null;
+    const q=new URL(req.url).searchParams;
     const coppia=new WebSocketPair();
-    this.accogli(coppia[1], token);
+    this.accogli(coppia[1], q.get('token')||null, (q.get('nome')||'').trim().slice(0,20));
     return new Response(null,{status:101, webSocket:coppia[0]});
   }
 
-  accogli(ws, token){
+  accogli(ws, token, nome){
     ws.accept();
     let p = token ? this.sedi.indexOf(token) : -1;     // riconnessione
     if(p<0){
@@ -516,6 +526,7 @@ export class Partita {
       if(p<0){ this.manda(ws,{t:'pieno'}); ws.close(1000,'partita al completo'); return; }
       this.sedi[p] = crypto.randomUUID().slice(0,8);
     }
+    if(nome) this.nomi[p]=nome;
     if(this.ws[p]){ try{ this.ws[p].close(1000,'sostituito'); }catch(e){} }
     this.ws[p]=ws;
     this.manda(ws,{t:'posto', p, token:this.sedi[p]});
@@ -618,14 +629,14 @@ export class Partita {
     const comp=v=>({s8:v.filter(c=>c.v===8).length, s9:v.filter(c=>c.v===9).length,
       s10:v.filter(c=>c.v===10).length, basse:v.filter(c=>c.v<8).length});
     const res={
-      v:1, tipo:'persone', draft:'completo', fine:Date.now(),
+      v:1, tipo:'persone', regole:improntaRegole(), draft:'completo', fine:Date.now(),
       durata:Math.round((Date.now()-this.inizio)/1000),
       mappa:g.mappa.map(a=>a.s),
       viandanti:[0,1].map(i=>{
         const tutte=[...g.v[i].carovana,...g.v[i].mano,...g.v[i].scarti,
           ...[g.v[i].campo.cav,g.v[i].campo.scu,g.v[i].campo.equ].filter(Boolean),
           ...g.v[i].campo.giullari];
-        return {carovana:tutte.map(c=>c.id), comp:comp(tutte),
+        return {nome:this.nomi[i]||'Anonimo', carovana:tutte.map(c=>c.id), comp:comp(tutte),
           mucchio:(g.iniziali&&g.iniziali[i]||[]).map(x=>x.c.id),
           pf:g.v[i].pf, manoFine:g.v[i].mano.length};
       }),
@@ -753,36 +764,124 @@ function riassunto(P){
 }
 
 function tabella(t,r){
-  if(!r.partite)return `<h2>${t}</h2><p class="vuoto">Nessuna partita registrata.</p>`;
-  return `<h2>${t}</h2>
+  if(!r.partite)return `<h3>${t}</h3><p class="vuoto">Nessuna partita registrata.</p>`;
+  return `<h3>${t}</h3>
   <p class="sotto">${r.partite} partite · ${r.giostre} giostre</p>
   <table>
     <tr><th>Carovana media</th><td>${r.comp.s8.toFixed(1)} Staffette · ${r.comp.s9.toFixed(1)} Guastafeste · ${r.comp.s10.toFixed(1)} Capocomici · ${r.comp.basse.toFixed(1)} carte 2-7</td></tr>
-    <tr><th>Miglior Scudiero</th><td>${r.scu.toFixed(2)} per giostra <span class="q">(${r.pesoScu} del totale)</span></td></tr>
-    <tr><th>Giostra dei Cavalieri</th><td>${r.cav.toFixed(2)} per giostra <span class="q">(${r.pesoCav})</span></td></tr>
-    <tr><th>Istrione del Regno</th><td>${r.istr.toFixed(2)} per giostra <span class="q">(${r.pesoIstr})</span></td></tr>
+    <tr><th>Miglior Scudiero<br><span class="pic">(per giostra, per singolo viandante)</span></th><td>${r.scu.toFixed(2)} per giostra <span class="q">(${r.pesoScu} del totale)</span></td></tr>
+    <tr><th>Giostra dei Cavalieri<br><span class="pic">(per giostra, per singolo viandante)</span></th><td>${r.cav.toFixed(2)} per giostra <span class="q">(${r.pesoCav})</span></td></tr>
+    <tr><th>Istrione del Regno<br><span class="pic">(per giostra, per singolo viandante)</span></th><td>${r.istr.toFixed(2)} per giostra <span class="q">(${r.pesoIstr})</span></td></tr>
     <tr><th>Giostre senza vincitore</th><td>Scudieri ${r.nulloScu} · Cavalieri ${r.nulloCav}</td></tr>
     <tr><th>Spareggio di seme</th><td>${r.spareggi} delle giostre</td></tr>
     <tr><th>Cavalieri a 8 esatto</th><td>${r.perfetti} degli schieramenti</td></tr>
-    <tr><th>Scudieri eliminati dal 9</th><td>${r.elim.toFixed(2)} per partita</td></tr>
-    <tr><th>La Staffetta sceglie</th><td>${r.staffPesca} volte di pescare, ${r.staffScarta} di scartare</td></tr>
+    <tr><th>Scudieri eliminati dal 9<br><span class="pic">(in totale in una partita)</span></th><td>${r.elim.toFixed(2)} per partita</td></tr>
+    <tr><th>La Staffetta sceglie<br><span class="pic">(in assoluto)</span></th><td>${r.staffPesca} volte di pescare, ${r.staffScarta} di scartare</td></tr>
     <tr><th>Punti Favore finali</th><td>media ${r.pfMedio.toFixed(1)} · da ${r.pfMin} a ${r.pfMax}</td></tr>
     <tr><th>Scarto fra i due</th><td>${r.scartoMedio.toFixed(1)} in media · ${r.tirate} finite entro 3 punti</td></tr>
     <tr><th>Carte in mano alla fine</th><td>${r.manoFine.toFixed(2)}</td></tr>
   </table>`;
 }
 
+function classifiche(P){
+  const g=new Map();
+  const tocca=(nome)=>{
+    const k=(nome||'Anonimo').trim().toLowerCase().replace(/\s+/g,' ')||'anonimo';
+    if(!g.has(k))g.set(k,{nome:nome||'Anonimo',partite:0,vinte:0,record:-99,scu:0,cav:0,istr:0});
+    const e=g.get(k); e.nome=nome||e.nome; return e;
+  };
+  for(const p of P){
+    if(p.tipo!=='persone'||!p.viandanti)continue;
+    const [a,b]=p.viandanti;
+    const ea=tocca(a.nome), eb=tocca(b.nome);
+    ea.partite++; eb.partite++;
+    ea.record=Math.max(ea.record,a.pf); eb.record=Math.max(eb.record,b.pf);
+    if(a.pf>b.pf)ea.vinte++; else if(b.pf>a.pf)eb.vinte++;
+    for(const gi of (p.giostre||[])){
+      if(gi.vincitori){
+        if(gi.vincitori.scu===0)ea.scu++; else if(gi.vincitori.scu===1)eb.scu++;
+        if(gi.vincitori.cav===0)ea.cav++; else if(gi.vincitori.cav===1)eb.cav++;
+      }
+      if(gi.punti){
+        if(gi.punti[0].istr>gi.punti[1].istr)ea.istr++;
+        else if(gi.punti[1].istr>gi.punti[0].istr)eb.istr++;
+      }
+    }
+  }
+  return [...g.values()];
+}
+
+function podio(lista,campo,unita){
+  const t=lista.filter(x=>x.partite>0).sort((a,b)=>b[campo]-a[campo]).slice(0,3);
+  if(!t.length||t[0][campo]<=0)return '<li class="vuoto">nessun dato</li>';
+  const m=['oro','argento','bronzo'];
+  return t.map((x,i)=>`<li class="${m[i]}"><b>${i+1}.</b> ${esc(x.nome)}
+    <span class="v">${x[campo]}${unita}</span>
+    <span class="q">${x.partite} partite</span></li>`).join('');
+}
+const esc=s=>String(s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+function sezioneClassifica(P){
+  const L=classifiche(P);
+  if(!L.length)return `<h2>Classifiche</h2><p class="vuoto">Nessuna partita fra persone, per ora.</p>`;
+  const b=(t,c,u,n)=>`<div class="cl"><h4>${t}</h4><ol>${podio(L,c,u)}</ol>
+    <p class="q">${n}</p></div>`;
+  return `<h2>Classifiche</h2>
+  <p class="sotto">Solo le partite fra persone: quelle contro il Bot non contano.</p>
+  <div class="clg">
+    ${b('Miglior punteggio','record',' PF','Il record in una singola partita.')}
+    ${b('Partite vinte','vinte','','Quante volte è arrivato primo.')}
+    ${b('Miglior Scudiero','scu','','Giostre in cui ha vinto gli Scudieri.')}
+    ${b('Miglior Cavaliere','cav','','Giostre in cui ha vinto i Cavalieri.')}
+    ${b('Miglior Giullare','istr','','Giostre in cui ha fatto più Istrione.')}
+  </div>`;
+}
+
+function pacchetti(P){
+  const m=new Map();
+  for(const p of P){
+    const v=(p.regole&&p.regole.v)||'—';
+    if(!m.has(v))m.set(v,{v,regole:p.regole||null,partite:[]});
+    m.get(v).partite.push(p);
+  }
+  return [...m.values()].sort((a,b)=>b.partite[0].salvata-a.partite[0].salvata);
+}
+
+function sezionePacchetto(pk,attuale){
+  const bot=pk.partite.filter(p=>p.tipo==='bot');
+  const due=pk.partite.filter(p=>p.tipo==='persone');
+  const r=pk.regole;
+  const par=r?`Scudiero +${r.scu} · Cavaliere +${r.cav} · bersaglio ${r.bersaglio} ·
+      pesca ${r.pesca}, tetto ${r.tetto}${r.note?'<br><span class="q">'+r.note+'</span>':''}`
+    : 'Partite registrate prima che l\'archivio distinguesse i pacchetti di regole.';
+  return `<div class="pk${attuale?' ora':''}">
+    <h2>Pacchetto ${pk.v}${attuale?' <span class="tag">in corso</span>':''}</h2>
+    <p class="sotto">${pk.partite.length} partite · ${par}</p>
+    ${tabella('Persona contro il Bot',riassunto(bot))}
+    ${tabella('Persona contro persona',riassunto(due))}
+  </div>`;
+}
+
+function vincitore(p){
+  const [a,b]=p.viandanti;
+  if(a.pf===b.pf)return '<span class="q">pari</span>';
+  const chi=a.pf>b.pf?a:b, i=a.pf>b.pf?0:1;
+  if(p.tipo==='bot')return i===0?'la persona':'il Bot';
+  return esc(chi.nome||'Anonimo');
+}
+
 function pagina(P,gioco){
+  const pks=pacchetti(P);
   const bot=P.filter(p=>p.tipo==='bot'), due=P.filter(p=>p.tipo==='persone');
-  const righe=P.slice(0,60).map(p=>{
+  const righe=P.slice().reverse().slice(0,150).map(p=>{
     const [a,b]=p.viandanti;
     const d=new Date(p.fine||p.salvata);
-    return `<tr><td>${p.n}</td><td>${d.toLocaleString('it-IT')}</td>
+    return `<tr><td><a href="/partita?n=${p.n}">${p.n}</a></td><td>${d.toLocaleString('it-IT')}</td>
       <td>${p.tipo==='bot'?'contro il Bot':'due persone'}</td>
-      <td>${p.draft==='rapido'?'rapido':'completo'}</td>
+      <td>${(p.regole&&p.regole.v)||'—'}</td><td>${p.draft==='rapido'?'rapido':'completo'}</td>
       <td class="n">${a.pf} — ${b.pf}</td>
       <td>${a.comp.s8}·${a.comp.s9}·${a.comp.s10} / ${b.comp.s8}·${b.comp.s9}·${b.comp.s10}</td>
-      <td><a href="/partita?n=${p.n}">dati</a></td></tr>`;}).join('');
+      <td>${vincitore(p)}</td></tr>`;}).join('');
   return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Carovana — l'archivio dei viaggi</title>
@@ -793,6 +892,8 @@ body{font-family:"Iowan Old Style",Palatino,Georgia,serif;background:#1b2b21;col
 .w{max-width:900px;margin:0 auto}
 h1{color:var(--oro2);font-size:30px;margin:0 0 4px;font-weight:600}
 h2{color:var(--oro2);font-size:19px;margin:34px 0 6px;font-weight:600}
+span.pic{font-size:10.5px;opacity:.45;letter-spacing:0;text-transform:none}
+h3{color:var(--oro);font-size:15px;margin:22px 0 4px;font-weight:600}
 .sub{letter-spacing:.2em;text-transform:uppercase;font-size:12px;opacity:.55;margin-bottom:22px}
 .sotto{font-size:13px;opacity:.6;margin:0 0 10px}
 .vuoto{opacity:.5;font-style:italic}
@@ -805,6 +906,23 @@ td{padding:6px 0;border-bottom:1px solid rgba(240,212,136,.1)}
 .n{font-variant-numeric:tabular-nums;color:var(--oro2)}
 a{color:var(--oro)}
 .avv{font-size:13px;opacity:.7;border-left:2px solid rgba(240,212,136,.3);padding-left:12px;margin:18px 0}
+.clg{display:flex;flex-wrap:wrap;gap:16px;margin-top:10px}
+.cl{flex:1;min-width:200px;border:1px solid rgba(240,212,136,.16);border-radius:9px;padding:12px 14px}
+.cl h4{margin:0 0 8px;font-size:13px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--oro);font-weight:600}
+.cl ol{list-style:none;margin:0;padding:0;font-size:14px}
+.cl li{padding:3px 0;display:flex;gap:7px;align-items:baseline}
+.cl li b{opacity:.5;font-weight:400}
+.cl li.oro{color:var(--oro2)}
+.cl .v{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--oro2)}
+.cl .q{font-size:11px}
+.cl p{margin:8px 0 0;font-size:11px;opacity:.45;line-height:1.4}
+.pk{border-top:1px solid rgba(240,212,136,.18);margin-top:30px;padding-top:6px}
+.pk.ora{border-top:2px solid var(--oro)}
+.pk h2{margin-top:16px;font-size:22px}
+.pk h3,.pk .sotto{margin-left:0}
+.tag{font-size:10px;letter-spacing:.14em;text-transform:uppercase;background:var(--oro);
+  color:#2b1e04;padding:2px 8px;border-radius:9px;vertical-align:middle}
 .giu{display:flex;gap:14px;margin-top:24px;flex-wrap:wrap}
 .giu a{border:1px solid rgba(240,212,136,.35);padding:7px 14px;border-radius:5px;text-decoration:none}
 .indietro{display:inline-block;font-size:13px;text-decoration:none;opacity:.75;margin-bottom:16px}
@@ -814,26 +932,25 @@ a{color:var(--oro)}
 <h1>L'archivio dei viaggi</h1>
 <div class="sub">Carovana — Duel Card Game</div>
 <p class="sotto">${P.length} partite registrate in tutto.</p>
-${tabella('Persona contro il Bot',riassunto(bot))}
-<p class="avv">Questi resoconti li manda il browser di chi gioca: la partita contro il Bot
-si svolge tutta lì e nessun arbitro può verificarla.</p>
-${tabella('Persona contro persona',riassunto(due))}
-<p class="avv">Questi invece li scrive il server, che arbitra la partita e vede tutto.
-Sono dati verificati.</p>
+<p class="avv">I resoconti delle partite contro il Bot li manda il browser di chi gioca:
+la partita si svolge tutta lì e nessun arbitro può verificarla. Quelli fra due persone
+li scrive il server, che arbitra e vede tutto: sono dati verificati.</p>
+${sezioneClassifica(P)}
+${pks.map((pk,i)=>sezionePacchetto(pk,i===0)).join('')}
 <h2>Le ultime partite</h2>
-<table class="el"><tr><th>n</th><th>quando</th><th>tipo</th><th>draft</th><th>punteggio</th><th>figure</th><th></th></tr>${righe||'<tr><td colspan="7" class="vuoto">niente da mostrare</td></tr>'}</table>
+<table class="el"><tr><th>n</th><th>quando</th><th>tipo</th><th>regole</th><th>draft</th><th>punteggio</th><th>figure</th><th>vincitore</th></tr>${righe||'<tr><td colspan="8" class="vuoto">niente da mostrare</td></tr>'}</table>
 <div class="giu"><a href="${gioco}">← Torna al gioco</a><a href="/csv">Scarica tutto in CSV</a></div>
 </div></body></html>`;
 }
 
 function csv(P){
-  const c=[['n','quando','tipo','draft','pf1','pf2','vincitore',
+  const c=[['n','quando','tipo','regole','draft','pf1','pf2','vincitore',
     'v1_staffette','v1_guastafeste','v1_capocomici','v1_basse','v1_mano_fine',
     'v2_staffette','v2_guastafeste','v2_capocomici','v2_basse','v2_mano_fine',
     'v1_carovana','v2_carovana'].join(',')];
   for(const p of P){
     const[a,b]=p.viandanti;
-    c.push([p.n,new Date(p.fine||p.salvata).toISOString(),p.tipo,p.draft,a.pf,b.pf,
+    c.push([p.n,new Date(p.fine||p.salvata).toISOString(),p.tipo,(p.regole&&p.regole.v)||'',p.draft,a.pf,b.pf,
       a.pf>b.pf?1:b.pf>a.pf?2:0,
       a.comp.s8,a.comp.s9,a.comp.s10,a.comp.basse,a.manoFine,
       b.comp.s8,b.comp.s9,b.comp.s10,b.comp.basse,b.manoFine,
