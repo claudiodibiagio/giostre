@@ -11,10 +11,11 @@ const PF_SCU=4, PF_CAV=6, BERSAGLIO=8, PESCA=5, TETTO=6;
 /* L'etichetta del pacchetto di regole in corso. Va cambiata ogni volta che
    si tocca una regola: l'archivio raggruppa le partite per etichetta e i
    pacchetti vecchi restano dove sono, intatti. */
-const REGOLE='A';
+const REGOLE='1.0';
+const DATA_REGOLE='30/08/2026';
 const NOTE_REGOLE='Staffetta con scelta fra pescare e scartare · Capocomico solo sugli altri Giullari · nessun tetto al Guastafeste';
 function improntaRegole(){
-  return {v:REGOLE, scu:PF_SCU, cav:PF_CAV, bersaglio:BERSAGLIO,
+  return {v:REGOLE, data:DATA_REGOLE, scu:PF_SCU, cav:PF_CAV, bersaglio:BERSAGLIO,
           pesca:PESCA, tetto:TETTO, note:NOTE_REGOLE};
 }
 const carta=(s,v)=>({s,v,id:s+v});
@@ -466,14 +467,15 @@ function vista(g, p, ultima){
        campo:vistaCampo(suo.campo, fine)}
     ]
   };
-  if(g.fase==='draft'){
-    V.gruppoIdx=g.gruppoIdx;
-    V.v[0].carovana=mio.carovana.slice();      // durante il draft vedo le mie
-    // l'approdo: le mie sei le posso sbirciare, delle sue vedo solo le scoperte
+  if(g.fase==='draft'||g.fase==='pronti'){
+    V.v[0].carovana=mio.carovana.slice();      // le mie le vedo: sono mie
     V.iniziali=[
       g.iniziali[p].map(x=>({c:x.c, coperta:x.coperta})),
       g.iniziali[av].map(x=>({c:x.coperta?NASCOSTA:x.c, coperta:x.coperta}))
     ];
+  }
+  if(g.fase==='draft'){
+    V.gruppoIdx=g.gruppoIdx;
     V.gruppi=g.gruppi.map(gr=>gr.map(sl=>({
       coperta:sl.coperta,
       presa: sl.presa===null?null:(sl.presa===p?0:1),
@@ -506,7 +508,7 @@ export class Partita {
     this.sedi=[null,null];      // token dei due posti
     this.ws=[null,null];
     this.pronti=[false,false];
-    this.diario=[]; this.inizio=Date.now(); this.archiviata=false; this.nomi=['Anonimo','Anonimo'];
+    this.diario=[]; this.notaN=0; this.nota=null; this.inizio=Date.now(); this.archiviata=false; this.nomi=['Anonimo','Anonimo'];
   }
 
   async fetch(req){
@@ -553,8 +555,12 @@ export class Partita {
         case 'draft':
           if(g.fase==='draft')this.diario.push(`d${p}:${a.i}`);
           if(g.fase!=='draft'||g.turno!==p) return;
-          this.ultima={gruppo:g.gruppoIdx, i:a.i, chi:p};
-          prendiInDraft(g,p,a.i);
+          {const sl=g.gruppi[g.gruppoIdx][a.i];
+           const era=sl&&sl.coperta, nome=sl?nomeCarta(sl.c):'';
+           this.ultima={gruppo:g.gruppoIdx, i:a.i, chi:p};
+           prendiInDraft(g,p,a.i);
+           this.segna(p, era?`prende una carta coperta: era <b>${nome}</b>.`:`prende <b>${nome}</b>.`,
+                         era?'prende una carta coperta.':`prende <b>${nome}</b>.`);}
           break;
         case 'inizia':
           // il via lo dà chi ha creato la partita
@@ -563,19 +569,36 @@ export class Partita {
           break;
         case 'conta':
           if(g.fase!=='conta'||g.v[p].contaFatta) return;
-          conta(g,p,Array.isArray(a.ids)?a.ids:[]);
+          {const n=(Array.isArray(a.ids)?a.ids:[]).length;
+           conta(g,p,Array.isArray(a.ids)?a.ids:[]);
+           this.segna(p, n?`alla Conta scarti ${n} cart${n===1?'a':'e'}.`:'non scarti nulla alla Conta.',
+                         n?`scarta ${n} cart${n===1?'a':'e'} alla Conta.`:'non scarta nulla alla Conta.');}
           break;
         case 'gioca':
           if(g.fase!=='giostra'||g.turno!==p||g.attesa) return;
-          {const av=g.v[1-p], prima=!!av.campo.scu;
+          {const av=g.v[1-p], prima=av.campo.scu;
+           const c=g.v[p].mano.find(x=>x.id===a.id);
+           const nome=c?nomeCarta(c):'';
            const ev=gioca(g,p,a.id,a.ruolo);
            if(this.gio){this.gio.mosse.push(`${p}:${a.ruolo}:${a.id}`);
-             if(prima&&!av.campo.scu)this.gio.eliminati++;}}
+             if(prima&&!av.campo.scu)this.gio.eliminati++;}
+           let mio,suo;
+           if(a.ruolo==='giullare'){ mio=suo=`gioca <b>${nome}</b>.`; }
+           else { mio=`schieri <b>${nome}</b> come <b>${NOME_RUOLO[a.ruolo]}</b>.`;
+                  suo=`schiera una carta coperta come <b>${NOME_RUOLO[a.ruolo]}</b>.`; }
+           if(ev.eliminato){ const t=` Il Guastafeste elimina lo Scudiero avversario: era <b>${nomeCarta(ev.eliminato)}</b>.`;
+             mio+=t; suo+=t; }
+           else if(c&&c.v===9&&a.ruolo==='giullare'){ mio+=' Nessuno Scudiero da eliminare: colpo a vuoto.'; suo+=' Nessuno Scudiero da eliminare: colpo a vuoto.'; }
+           this.segna(p,mio,suo);}
           this.dopoMossa();
           break;
         case 'staffetta':
           if(!g.attesa||g.attesa.p!==p) return;
-          risolviStaffetta(g,a.scelta||{tipo:'pesca'});
+          {const t0=(a.scelta||{}).tipo;
+           risolviStaffetta(g,a.scelta||{tipo:'pesca'});
+           this.segna(p,
+             t0==='scarta'?'con la Staffetta scarti una carta dalla mano.':'con la Staffetta peschi una carta.',
+             t0==='scarta'?'con la Staffetta sceglie di scartare una carta.':'con la Staffetta sceglie di pescare.');}
           if(this.gio){const t=(a.scelta||{}).tipo;
             if(t==='scarta')this.gio.staffScarta++;else this.gio.staffPesca++;
             this.gio.mosse.push(`${p}:staffetta:${t||'pesca'}`);}
@@ -584,6 +607,7 @@ export class Partita {
         case 'passa':
           if(g.fase!=='giostra'||g.turno!==p||g.attesa) return;
           passa(g,p);
+          this.segna(p,'passi: non giocherai più carte in questa giostra.','passa: non giocherà più carte in questa giostra.');
           if(this.gio)this.gio.mosse.push(`${p}:passa`);
           this.dopoMossa();
           break;
@@ -600,8 +624,11 @@ export class Partita {
     this.trasmetti();
   }
 
+  segna(p,mio,suo){ this.nota={id:++this.notaN, p, mio, suo:suo===undefined?mio:suo}; }
+
   apriGiostra(){
-    iniziaGiostra(this.g); this.R=null; this.ultima=null;
+    iniziaGiostra(this.g);
+    this.segna(null,`<b>Giostra ${this.g.giostra}</b> — Castello di ${NOME_SEME[this.g.assoCorrente.s]}, il Castello vicino è ${NOME_SEME[this.g.assoNemico.s]}.`); this.R=null; this.ultima=null;
     this.gio={corrente:this.g.assoCorrente.s, nemico:this.g.assoNemico.s,
       mosse:[], eliminati:0, staffPesca:0, staffScarta:0};
     (this.g.registro=this.g.registro||[]).push(this.gio);
@@ -610,6 +637,8 @@ export class Partita {
     if(this.g.fase!=='applausi')return;
     this.R=applausi(this.g);
     const R=this.R, g=this.g;
+    this.segna(null,`<b>Applausi della giostra ${g.giostra}</b>: `+
+      `${g.v[0].pf} a ${g.v[1].pf} fra i due viandanti.`);
     this.gio.campi=g.v.map(v=>({
       cav:v.campo.cav?v.campo.cav.id:null, scu:v.campo.scu?v.campo.scu.id:null,
       equ:v.campo.equ?v.campo.equ.id:null, giullari:v.campo.giullari.map(c=>c.id)}));
@@ -655,8 +684,10 @@ export class Partita {
     const collegati = this.ws.filter(Boolean).length;
     for(let p=0;p<2;p++){
       if(!this.ws[p]) continue;
+      const n=this.nota;
       this.manda(this.ws[p], this.g
-        ? {t:'stato', collegati, v:vista(this.g,p,this.ultima), R:vistaR(this.R,p)}
+        ? {t:'stato', collegati, v:vista(this.g,p,this.ultima), R:vistaR(this.R,p),
+           nota: n?{id:n.id, chi:n.p===null?-1:(n.p===p?0:1), testo:n.p===p?n.mio:n.suo}:null}
         : {t:'attesa', collegati});
     }
   }
