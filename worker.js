@@ -536,6 +536,7 @@ export class Partita {
     if(this.sedi[0] && this.sedi[1] && !this.g){
       this.g = nuovaPartita({primo: Math.random()<0.5?0:1, nomi:['A','B']});
       creaDraft(this.g);
+      this.inizio = Date.now();
     }
     this.trasmetti();
 
@@ -764,6 +765,8 @@ export class Archivio {
 
 /* --- statistiche ------------------------------------------------------- */
 const med=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
+const mmss=s=>{ s=Math.max(0,Math.round(s||0));
+  return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
 const pc=(a,b)=>b?(100*a/b).toFixed(1)+'%':'—';
 
 function riassunto(P){
@@ -790,7 +793,9 @@ function riassunto(P){
     staffScarta:g.reduce((a,x)=>a+(x.staffScarta||0),0),
     pfMedio:med(pf), pfMax:pf.length?Math.max(...pf):0, pfMin:pf.length?Math.min(...pf):0,
     scartoMedio:med(scarti), tirate:pc(scarti.filter(x=>x<=3).length,scarti.length),
-    manoFine:med(vi.map(v=>v.manoFine))
+    manoFine:med(vi.map(v=>v.manoFine)),
+    durata:med(P.filter(p=>p.durata).map(p=>p.durata)),
+    conDurata:P.filter(p=>p.durata).length
   };
 }
 
@@ -811,6 +816,8 @@ function tabella(t,r){
     <tr><th>Punti Favore finali</th><td>media ${r.pfMedio.toFixed(1)} Punti Favore · da ${r.pfMin} a ${r.pfMax}</td></tr>
     <tr><th>Scarto fra i due</th><td>${r.scartoMedio.toFixed(1)} Punti Favore in media · ${r.tirate} finite entro 3 punti</td></tr>
     <tr><th>Carte in mano alla fine</th><td>${r.manoFine.toFixed(2)}</td></tr>
+    <tr><th>Durata media<br><span class="pic">(minuti e secondi)</span></th><td>${
+      r.conDurata?mmss(r.durata)+` <span class="q">su ${r.conDurata} partite cronometrate</span>`:'—'}</td></tr>
   </table>`;
 }
 
@@ -932,13 +939,14 @@ function pagina(P,gioco){
         <td>${giocatori(p)}</td>
         <td>${etichetta(p)}</td>
         <td>${p.draft==='rapido'?'rapido':'completo'}</td>
+        <td class="n">${p.durata?mmss(p.durata):'—'}</td>
         <td class="n">${a.pf} — ${b.pf}</td>
         <td>${a.comp.s8}·${a.comp.s9}·${a.comp.s10} / ${b.comp.s8}·${b.comp.s9}·${b.comp.s10}</td>
         <td>${vincitore(p)}</td></tr>`;}).join('');
     return `<h3>${titolo}</h3><table class="el">
-      <tr><th>n</th><th>quando</th><th>viandanti</th><th>regole</th><th>draft</th>
+      <tr><th>n</th><th>quando</th><th>viandanti</th><th>regole</th><th>draft</th><th>durata</th>
       <th>punteggio</th><th>figure</th><th>vincitore</th></tr>
-      ${righe||`<tr><td colspan="8" class="vuoto">${vuoto}</td></tr>`}</table>`;
+      ${righe||`<tr><td colspan="9" class="vuoto">${vuoto}</td></tr>`}</table>`;
   };
   return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1003,13 +1011,13 @@ ${elenco(bot,'Persona contro il Bot','Nessuna partita contro il Bot, per ora.')}
 }
 
 function csv(P){
-  const c=[['n','quando','tipo','regole','draft','pf1','pf2','vincitore',
+  const c=[['n','quando','tipo','regole','draft','durata_secondi','pf1','pf2','vincitore',
     'v1_staffette','v1_guastafeste','v1_capocomici','v1_basse','v1_mano_fine',
     'v2_staffette','v2_guastafeste','v2_capocomici','v2_basse','v2_mano_fine',
     'v1_carovana','v2_carovana'].join(',')];
   for(const p of P){
     const[a,b]=p.viandanti;
-    c.push([p.n,new Date(p.fine||p.salvata).toISOString(),p.tipo,etichetta(p),p.draft,a.pf,b.pf,
+    c.push([p.n,new Date(p.fine||p.salvata).toISOString(),p.tipo,etichetta(p),p.draft,p.durata||'',a.pf,b.pf,
       a.pf>b.pf?1:b.pf>a.pf?2:0,
       a.comp.s8,a.comp.s9,a.comp.s10,a.comp.basse,a.manoFine,
       b.comp.s8,b.comp.s9,b.comp.s10,b.comp.basse,b.manoFine,
